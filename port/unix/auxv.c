@@ -31,7 +31,9 @@
 #include <elf.h>
 #include <link.h>
 #include <pthread.h>
+#if defined(LINUXPPC)
 #include <asm/elf.h>
+#endif /* defined(LINUXPPC) */
 #include <auxv.h>
 
 #include <errno.h>
