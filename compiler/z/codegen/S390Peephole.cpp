@@ -74,6 +74,45 @@ TR_S390PreRAPeephole::perform()
 
    while (_cursor != NULL)
       {
+      switch(_cursor->getOpCodeValue())
+         {
+         case TR::InstOpCode::L:
+            {
+            LoadStoreReduction(TR::InstOpCode::ST, 4);
+            if (comp()->getOption(TR_TraceCG))
+               {
+               printInst();
+               }
+            break;
+            }
+         case TR::InstOpCode::LFH:
+            {
+            LoadStoreReduction(TR::InstOpCode::STFH, 4);
+            if (comp()->getOption(TR_TraceCG))
+               {
+               printInst();
+               }
+            break;
+            }
+         case TR::InstOpCode::LG:
+            {
+            LoadStoreReduction(TR::InstOpCode::STG, 8);
+            if (comp()->getOption(TR_TraceCG))
+               {
+               printInst();
+               }
+            break;
+            }
+         default:
+            {
+            if (comp()->getOption(TR_TraceCG))
+               {
+               printInst();
+               }
+            break;
+            }
+         }
+
       moveInstr = true;
       if(moveInstr)
          _cursor = _cursor->getNext();
@@ -81,6 +120,63 @@ TR_S390PreRAPeephole::perform()
 
    if (comp()->getOption(TR_TraceCG))
       printInfo("\n\n");
+   }
+
+bool
+TR_S390PreRAPeephole::LoadStoreReduction(TR::InstOpCode::Mnemonic storeOpCode, uint16_t size)
+   {
+   if (_cursor->getNext()->getOpCodeValue() == storeOpCode)
+      {
+      TR::S390RXInstruction* loadInst = static_cast<TR::S390RXInstruction*> (_cursor);
+      TR::S390RXInstruction* storeInst = static_cast<TR::S390RXInstruction*> (_cursor->getNext());
+
+      // MVC instruction does not support memory references with index registers, an extra LA instruction
+      // and register would need to be used if either memory reference has an index register.
+      if (loadInst->getMemoryReference()->getIndexRegister() || storeInst->getMemoryReference()->getIndexRegister())
+         {
+         return false;
+         }
+
+      TR::Register* reg = loadInst->getRegisterOperand(1);
+
+      if (reg != storeInst->getRegisterOperand(1))
+         {
+         return false;
+         }
+
+      // Register must only be used in the load-store sequence, possibly used in the memory reference
+      // of the load however, not in the store since the the register would have to be loaded first.
+      ncount_t uses = 2;
+      uses += reg == loadInst->getMemoryReference()->getBaseRegister();
+
+      // Bail out if register could have future uses, or if either instruction has dependencies.
+      // Since 2 instructions are replaced with one before RA, we can't handle things like merging
+      // dependencies.
+      if (reg->getTotalUseCount() != uses || reg->isDependencySet() ||
+         loadInst->getDependencyConditions() || storeInst->getDependencyConditions())
+         {
+         return false;
+         }
+
+      if (performTransformation(comp(), "O^O S390 PEEPHOLE: Transforming load-store sequence at %p to MVC.", storeInst))
+         {
+         TR::DebugCounter::incStaticDebugCounter(_cg->comp(), "z/peephole/load-store");
+
+         loadInst->getMemoryReference()->resetMemRefUsedBefore();
+         storeInst->getMemoryReference()->resetMemRefUsedBefore();
+
+         _cg->deleteInst(storeInst);
+
+         _cg->replaceInst(loadInst, _cursor = generateSS1Instruction(_cg, TR::InstOpCode::MVC, comp()->getStartTree()->getNode(), size - 1, storeInst->getMemoryReference(), loadInst->getMemoryReference(), _cursor->getPrev()));
+
+         reg->decTotalUseCount(2);
+         storeInst->getMemoryReference()->getBaseRegister()->decTotalUseCount();
+         loadInst->getMemoryReference()->getBaseRegister()->decTotalUseCount();
+
+         return true;
+         }
+      }
+   return false;
    }
 
 ///////////////////////////////////////////////////////////////////////////////
