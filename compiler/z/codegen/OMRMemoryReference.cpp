@@ -2126,9 +2126,11 @@ OMR::Z::MemoryReference::enforce4KDisplacementLimit(TR::Node * node, TR::CodeGen
 
    TR_ASSERT(!forcePLXFixup, "This logic is only used for markAndAdjustForLongDisplacementIfNeeded. You probably want the other flag.");
 
+
    if ((_offset < 0 || _offset >= MAXDISP || forcePLXFixup || forceFixup) &&
        !self()->isAdjustedForLongDisplacement())
       {
+      forcePLXFixup = true;
       TR::Register * tempTargetRegister = NULL;
       if (TR::Compiler->target.is64Bit())
          tempTargetRegister = cg->allocate64bitRegister();
